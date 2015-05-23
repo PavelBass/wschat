@@ -15,8 +15,8 @@ UserTemplate = collections.namedtuple('UserTemplate', "login, allowed_rooms")
 class DB(object):
     __metaclass__ = ABCMeta
 
-    default_rooms = ('Free Chat', 'Python Developers', 'JavaScript Developers')
-    default_room = default_rooms[0]
+    _default_rooms = ('Free Chat', 'Python Developers', 'JavaScript Developers')
+    _default_room = default_rooms[0]
 
     @abstractmethod
     def is_correct_user(self, login, password):
@@ -32,17 +32,7 @@ class DB(object):
         pass
 
     @abstractmethod
-    def get_user_rooms(self, login):
-        """ Return all rooms allowed for that user
-            This method dont check if login is correct,
-            you must check it before.
-        :param login:
-        :return: list of allowed rooms
-        """
-        pass
-
-    @abstractmethod
-    def get_user_current_room(self, login):
+    def get_current_room(self, login):
         """ Return current room of user
         :param login: user login
         :return: current room
@@ -50,7 +40,7 @@ class DB(object):
         pass
 
     @abstractmethod
-    def set_user_current_room(self, login, room):
+    def set_current_room(self, login, room):
         """ Change current room for user if possible
             and rewrite his record in DataBase
         :param login: user login
@@ -107,56 +97,61 @@ class DB(object):
         """
         pass
 
+    @property
+    def default_room(self):
+        return self._default_room
+
+    @property
+    def default_rooms(self):
+        return self._default_rooms
+
 
 class DBPython(DB):
     def __init__(self):
-        self.users = dict()
-        self.rooms = dict()
+        self._users = dict()
+        self._rooms = dict()
         for room in self.default_rooms:
-            self.rooms[room] = list()
+            self._rooms[room] = list()
 
     def is_correct_user(self, login, password):
-        user = self.users.get(login, None)
+        user = self._users.get(login, None)
         if user is None:
             return
         return hashlib.md5(password).hexdigest() == user.pass_hash
 
-    def get_user_rooms(self, login):
-        return self.users[login].allowed_rooms
-
-    def get_user_current_room(self, login):
-        room = self.default_room if login not in self.users else self.users[login].current_room
+    def get_current_room(self, login):
+        room = self.default_room if login not in self._users else self._users[login].current_room
         return room
 
-    def set_user_current_room(self, login, room):
-        user = self.users[login]
-        self.users[login] = UserRecord(user.pass_hash, user.allowed_rooms, room)
+    def set_current_room(self, login, room):
+        user = self._users[login]
+        self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, room)
 
     def get_room_history(self, room):
-        history = self.rooms.get(room, None)
+        history = self._rooms.get(room, None)
         if history is not None:
             history = history[-10:]
             return history
 
     def new_user(self, login, password):
-        if login in self.users:
+        if login in self._users:
             return
         allowed_rooms = [self.default_room]
-        self.users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, self.default_room)
+        self._users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, self.default_room)
         return allowed_rooms
 
     def new_room(self, room):
-        if room in self.rooms:
+        if room in self._rooms:
             return False
-        self.rooms[room] = list()
+        self._rooms[room] = list()
         return True
 
     def new_message(self, room, mess):
-        self.rooms[room].append(mess)
+        self._rooms[room].append(mess)
 
     @property
     def all_rooms(self):
-        return self.rooms.keys()
+        return self._rooms.keys()
 
 
 class DBRedis(DB):

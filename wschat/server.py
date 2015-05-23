@@ -39,7 +39,7 @@ class MainHandler(tornado.web.RequestHandler):
         usr = self.current_user
         if usr is not None:
             usr = tornado.escape.xhtml_escape(usr)
-        self.render("index.html", usr=usr, error=None, rooms=self.all_rooms)
+        self.render("index.html", usr=usr, error='', rooms=self.all_rooms)
 
     @gen.coroutine
     def post(self):
@@ -76,6 +76,7 @@ class MainHandler(tornado.web.RequestHandler):
     def get_current_user(self):
         user = self.get_secure_cookie('user')
         if self.db.is_correct_user(user, '') is None:
+            # Non-existent in database user
             self.clear_cookie('user')
             user = None
         return user
@@ -87,7 +88,7 @@ class MainHandler(tornado.web.RequestHandler):
 
 class ChatHandler(tornado.websocket.WebSocketHandler):
     waiters = dict()
-    for room in DB.rooms:
+    for room in DB._rooms:
         waiters[room] = set()
 
     def __init__(self, *args, **kwargs):
@@ -107,10 +108,8 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         if user is None:
             user = 'Anonymous'
         mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
-        print mess
         self.db.new_message(room, mess)
         self.send_to_waiters(room, mess)
-
 
     def send_to_waiters(self, room, mess):
         mess = 'MESSAGE:[%s] %s' % (room, mess)
@@ -142,14 +141,14 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
     @property
     def current_room(self):
         user = self.current_user
-        return self.db.get_user_current_room(user)
+        return self.db.get_current_room(user)
 
     def set_current_room(self, room):
-        if room not in self.db.rooms:
+        if room not in self.db.all_rooms:
             return None
         self.waiters[self.current_room].remove(self)
         self.waiters[room].add(self)
-        self.db.set_user_current_room(self.current_user, room)
+        self.db.set_current_room(self.current_user, room)
         return room
 
 def main(host, port):
