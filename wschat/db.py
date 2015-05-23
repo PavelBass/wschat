@@ -1,6 +1,11 @@
 import hashlib
 import collections
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, abstractproperty
+
+try:
+    import redis
+except ImportError:
+    redis = None
 
 
 UserRecord = collections.namedtuple('UserRecord', "pass_hash allowed_rooms current_room")
@@ -9,6 +14,9 @@ UserTemplate = collections.namedtuple('UserTemplate', "login, allowed_rooms")
 
 class DB(object):
     __metaclass__ = ABCMeta
+
+    default_rooms = ('Free Chat', 'Python Developers', 'JavaScript Developers')
+    default_room = default_rooms[0]
 
     @abstractmethod
     def is_correct_user(self, login, password):
@@ -92,11 +100,20 @@ class DB(object):
         """
         pass
 
+    @abstractproperty
+    def all_rooms(self):
+        """ Return all existent rooms
+        :return: list/tuple of rooms
+        """
+        pass
+
 
 class DBPython(DB):
     def __init__(self):
         self.users = dict()
-        self.rooms = {'free chat': list()}
+        self.rooms = dict()
+        for room in self.default_rooms:
+            self.rooms[room] = list()
 
     def is_correct_user(self, login, password):
         user = self.users.get(login, None)
@@ -108,20 +125,24 @@ class DBPython(DB):
         return self.users[login].allowed_rooms
 
     def get_user_current_room(self, login):
-        return self.users[login].current_room
+        room = self.default_room if login not in self.users else self.users[login].current_room
+        return room
 
     def set_user_current_room(self, login, room):
         user = self.users[login]
         self.users[login] = UserRecord(user.pass_hash, user.allowed_rooms, room)
 
     def get_room_history(self, room):
-        room = self.rooms.get(room, None)
+        history = self.rooms.get(room, None)
+        if history is not None:
+            history = history[-10:]
+            return history
 
     def new_user(self, login, password):
         if login in self.users:
             return
-        allowed_rooms = ['free chat']
-        self.users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, 'free chat')
+        allowed_rooms = [self.default_room]
+        self.users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, self.default_room)
         return allowed_rooms
 
     def new_room(self, room):
@@ -133,6 +154,11 @@ class DBPython(DB):
     def new_message(self, room, mess):
         self.rooms[room].append(mess)
 
+    @property
+    def all_rooms(self):
+        return self.rooms.keys()
+
 
 class DBRedis(DB):
-    pass
+    def __init__(self):
+        self.r = redis.Redis()
