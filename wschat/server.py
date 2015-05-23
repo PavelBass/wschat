@@ -4,6 +4,7 @@ import logging
 import hashlib
 import collections
 import tornado.web
+import tornado.websocket
 import tornado.escape
 
 from tornado.ioloop import IOLoop
@@ -140,10 +141,10 @@ class MainHandler(tornado.web.RequestHandler):
     #     #    print user
     #     return user
 
-class ChatHandler(tornado.web.RequestHandler):
+class ChatHandler(tornado.websocket.WebSocketHandler):
     @gen.coroutine
     def get(self):
-        self.render("index.html", usr=None)
+        pass
 
 def main(port=8080, interface='localhost'):
     handlers = [

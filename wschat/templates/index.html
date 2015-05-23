@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <link rel="stylesheet" href="{{ static_url("index.css") }}" type="text/css"/>
+    <script>
+        socket_path = 'ws://127.0.0.1:8080/chat';
+    </script>
     <title>Rambler Chat</title>
 </head>
 <body>
@@ -10,7 +14,7 @@
         <form method="post">
             {% module xsrf_form_html() %}
         {% if usr is not None %}
-            <label>{{ usr }}</label>
+            Wellcome, <span class="username">{{ usr }}</span>
             <input type="hidden", name="logout", value="logout"><br>
             <input type="submit" value="Logout">
         {% else %}
@@ -26,5 +30,12 @@
         {% end %}
         </form>
     </div>
+    <div id="chat">
+    <p>Wellcome to chat</p>
+    </div>
+    <div id="sender">
+        <input type="text" id="sendmessage"><input type="button" onclick="sender();">
+    </div>
+    <script type="text/javascript" src="{{ static_url('client.js') }}"></script>
 </body>
 </html>
