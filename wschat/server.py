@@ -88,7 +88,7 @@ class MainHandler(tornado.web.RequestHandler):
 
 class ChatHandler(tornado.websocket.WebSocketHandler):
     waiters = dict()
-    for room in DB._rooms:
+    for room in DB.all_rooms:
         waiters[room] = set()
 
     def __init__(self, *args, **kwargs):
@@ -96,20 +96,27 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         self.db = DB
 
     def open(self):
-        self.connect_to_room(self.db.default_room)
+        user = self.current_user
+        if user is None:
+            self.connect_to_room(self.db.default_room)
+        else:
+            for room in self.db.get_current_rooms(user):
+                self.connect_to_room(room)
 
     def on_close(self):
-        if self in self.waiters[self.current_room]:
-            self.waiters[self.current_room].remove(self)
+        for room in self.current_rooms:
+            if self in self.waiters[room]:
+                self.waiters[room].remove(self)
 
     def on_message(self, mess):
-        room = self.current_room
+        rooms = self.current_rooms
         user = self.current_user
         if user is None:
             user = 'Anonymous'
         mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
-        self.db.new_message(room, mess)
-        self.send_to_waiters(room, mess)
+        for room in rooms:
+            self.db.new_message(room, mess)
+            self.send_to_waiters(room, mess)
 
     def send_to_waiters(self, room, mess):
         mess = 'MESSAGE:[%s] %s' % (room, mess)
@@ -120,10 +127,19 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
                 pass
 
     def connect_to_room(self, room):
+        # NOTE: you must check if room exists before calling this method
         self.waiters[room].add(self)
-        self.send_server_message('You a connected to room: "%s"' % room)
+        self.send_server_message('You are connected to room: "%s"' % room)
+        user = self.current_user
+        if user is not None and room not in self.current_rooms:
+            self.db.add_room_to_current(user, room)
         history = self.db.get_room_history(room)
         self.send_history(room, history)
+
+    def disconnect_from_room(self, room):
+        # NOTE: you must check if room exists before calling this method
+        self.waiters[room].remove(self)
+        self.send_server_message('You are disconnected from room: "%s"' % room)
 
     def send_server_message(self, mess):
         mess = 'SERVER:%s' % mess
@@ -139,17 +155,10 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         return self.get_secure_cookie('user')
 
     @property
-    def current_room(self):
+    def current_rooms(self):
         user = self.current_user
-        return self.db.get_current_room(user)
+        return self.db.get_current_rooms(user)
 
-    def set_current_room(self, room):
-        if room not in self.db.all_rooms:
-            return None
-        self.waiters[self.current_room].remove(self)
-        self.waiters[room].add(self)
-        self.db.set_current_room(self.current_user, room)
-        return room
 
 def main(host, port):
     handlers = [
