@@ -216,7 +216,8 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
             else:
                 mess = 'User "%s" successfully created. Try to login.' % login
         self.send_server_message(mess)
-        
+
+
 def main(host, port):
     handlers = [
         (r"/", MainHandler),
