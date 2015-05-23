@@ -70,7 +70,7 @@ class DB(object):
         :param room: room name
         :return:
             None: if room doesn't exists
-            list: last 50 messages in room
+            list: last 10 messages in room
         """
         pass
 
@@ -134,24 +134,31 @@ class DBPython(DB):
         return hashlib.md5(password).hexdigest() == user.pass_hash
 
     def get_current_rooms(self, login):
-        room = self.default_room if login not in self._users else self._users[login].current_room
-        return room
+        rooms = (self.default_room,) if login not in self._users else self._users[login].current_rooms
+        return rooms
 
     def add_room_to_current(self, login, room):
         user = self._users[login]
-        self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, room)
+        rooms = list(user.current_rooms).append(room)
+        self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
+
+    def remove_room_from_current(self, login, room):
+        user = self._users[login]
+        rooms = list(user.current_rooms)
+        rooms.pop(room)
+        self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
 
     def get_room_history(self, room):
         history = self._rooms.get(room, None)
         if history is not None:
             history = history[-10:]
-            return history
+        return history
 
     def new_user(self, login, password):
         if login in self._users:
             return
-        allowed_rooms = [self.default_room]
-        self._users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, self.default_room)
+        allowed_rooms = (self.default_room,)
+        self._users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, allowed_rooms)
         return allowed_rooms
 
     def new_room(self, room):
