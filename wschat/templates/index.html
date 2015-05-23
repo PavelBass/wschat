@@ -1,9 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Rambler Chat</title>
+    <title>Rambler Chat</title>
 </head>
 <body>
-<h1>Hi there</h1>
+    <h1>Hi there</h1>
+    <div>
+        <error>{% if error %}{{ error }}{% end %}</error>
+        <form method="post">
+            {% module xsrf_form_html() %}
+        {% if usr is not None %}
+            <label>{{ usr }}</label>
+            <input type="hidden", name="logout", value="logout"><br>
+            <input type="submit" value="Logout">
+        {% else %}
+                <label>Login:</label><br>
+                <input type="text" name="login"><br>
+
+                <label>Password:</label><br>
+                <input type="password" name="pass"><br>
+
+                <label>Create New User</label>
+                <input type="checkbox" name="create"><br>
+                <input type="submit" value="Ok">
+        {% end %}
+        </form>
+    </div>
 </body>
 </html>
