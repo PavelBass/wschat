@@ -8,15 +8,14 @@ except ImportError:
     redis = None
 
 
-UserRecord = collections.namedtuple('UserRecord', "pass_hash allowed_rooms current_room")
-UserTemplate = collections.namedtuple('UserTemplate', "login, allowed_rooms")
+UserRecord = collections.namedtuple('UserRecord', "pass_hash allowed_rooms current_rooms")
 
 
 class DB(object):
     __metaclass__ = ABCMeta
 
     _default_rooms = ('Free Chat', 'Python Developers', 'JavaScript Developers')
-    _default_room = default_rooms[0]
+    _default_room = _default_rooms[0]
 
     @abstractmethod
     def is_correct_user(self, login, password):
@@ -32,20 +31,35 @@ class DB(object):
         pass
 
     @abstractmethod
-    def get_current_room(self, login):
-        """ Return current room of user
+    def get_current_rooms(self, login):
+        """ Return current rooms of user
         :param login: user login
-        :return: current room
+        :return: list/tuple of current rooms
         """
         pass
 
     @abstractmethod
-    def set_current_room(self, login, room):
-        """ Change current room for user if possible
+    def add_room_to_current(self, login, room):
+        """ Add room to current rooms for user
             and rewrite his record in DataBase
         :param login: user login
         :param room: new room
         :return:
+            None: if room doesn't exists
+            True: if room was added
+            False: if room was added before
+        """
+        pass
+
+    @abstractmethod
+    def remove_room_from_current(self, login, room):
+        """ Remove room from current rooms for user
+             and rewrite his record in DataBase
+        :param login: user login
+        :param room: room name to remove
+        :return:
+            False: if room was not added
+            True: if room was successfully removed
         """
         pass
 
@@ -119,11 +133,11 @@ class DBPython(DB):
             return
         return hashlib.md5(password).hexdigest() == user.pass_hash
 
-    def get_current_room(self, login):
+    def get_current_rooms(self, login):
         room = self.default_room if login not in self._users else self._users[login].current_room
         return room
 
-    def set_current_room(self, login, room):
+    def add_room_to_current(self, login, room):
         user = self._users[login]
         self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, room)
 
