@@ -1,86 +1,34 @@
 # coding: utf-8
 import os
 import logging
-import hashlib
-import collections
 import tornado.web
 import tornado.websocket
 import tornado.escape
 
+from tornado.log import enable_pretty_logging
+enable_pretty_logging()
 from tornado.ioloop import IOLoop
 from tornado import gen
 
+try:
+    import redis
+except ImportError:
+    redis = None
+    logging.warn(' redis-py is not installed, all data will be lost on restart')
 
-UserRecord = collections.namedtuple('UserRecord', "pass_hash allowed_rooms")
-UserTemplate = collections.namedtuple('UserTemplate', "login, allowed_rooms")
+if redis is not None:
+    try:
+        r = redis.Redis()
+        r.info()
+        from .db import DBRedis as DBInterface
+    except redis.exceptions.ConnectionError:
+        logging.warn('Cant connect to REDIS, all data will be lost on restart')
+        from .db import DBPython as DBInterface
+else:
+    from .db import DBPython as DBInterface
 
+DB = DBInterface()
 
-class DBImitation(object):
-    def __init__(self):
-        self.users = dict()
-        self.rooms = {0: list()}
-
-    def is_correct_user(self, login, password):
-        ''' Check if passed login is in base and password is correct
-
-        :param login: passed login
-        :param password: passed password (not hash)
-        :return:
-            None: if login not in database
-            True: if login in database and password is correct
-            False: if login in database but password is not correct
-        '''
-        user = self.users.get(login, None)
-        if user is None:
-            return
-        return hashlib.md5(password).hexdigest() == user.pass_hash
-
-    def get_user_rooms(self, login):
-        ''' Return all rooms allowed for that user
-            This method dont check if login is correct,
-            you must check it before.
-        :param login:
-        :return: list of allowed rooms
-        '''
-        return self.users[login].allowed_rooms
-
-    def get_room(self, room):
-        ''' Return room history (if room exists)
-
-        :param room: room name
-        :return:
-            None: if room doesn't exists
-            list: last 50 messages in room
-        '''
-        room = self.rooms.get(room, None)
-
-    def new_user(self, login, password):
-        ''' Create new user
-        :param login: passed login
-        :param password: passed password
-        :return:
-            None: if user already exists
-            list: default allowed rooms
-        '''
-        if login in self.users:
-            return
-        allowed_rooms = [0]
-        self.users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms)
-        return allowed_rooms
-
-    def new_room(self, room):
-        ''' Create new room
-        :param room: room name
-        :return:
-            False: if such room already exists
-            True: after creation
-        '''
-        if room in self.rooms:
-            return False
-        self.rooms[room] = list()
-        return True
-
-DB = DBImitation()
 
 class MainHandler(tornado.web.RequestHandler):
     def initialize(self):
@@ -91,21 +39,23 @@ class MainHandler(tornado.web.RequestHandler):
         usr = self.current_user
         if usr is not None:
             usr = tornado.escape.xhtml_escape(usr)
-        self.render("index.html", usr=usr, error=None)
+        self.render("index.html", usr=usr, error=None, rooms=self.all_rooms)
 
     @gen.coroutine
     def post(self):
+        # Logout
         logout = self.get_argument('logout', '')
         if logout == 'logout':
             self.clear_cookie('user', '')
             self.redirect('/')
             return
+        # Login/Registration
         error = ''
         create = self.get_argument('create', '')
         login, password = self.get_argument('login', None), self.get_argument('pass', None)
         if None in (login, password) or not (login and password):
             error = 'Empty field'
-            self.render('index.html', usr=None, error=error)
+            self.render('index.html', usr=None, error=error, rooms=self.all_rooms)
             return
         if create:
             user = self.db.new_user(login, password)
@@ -117,52 +67,109 @@ class MainHandler(tornado.web.RequestHandler):
                 error = "No such user"
             elif not user:
                 error = 'Wrong password'
-            else:
-                user = self.db.get_user_rooms(login)
-                user = UserTemplate(login, user)
         if error:
-            self.render('index.html', usr=None, error=error)
+            self.render('index.html', usr=None, error=error, rooms=self.all_rooms)
             return
         self.set_secure_cookie('user', login)
         self.redirect('/')
 
     def get_current_user(self):
         user = self.get_secure_cookie('user')
-        if user and user not in self.db.users:
+        if self.db.is_correct_user(user, '') is None:
             self.clear_cookie('user')
             user = None
-        return None if not user else user
+        return user
 
-    # @property
-    # def current_user(self):
-    #     user = super(MainHandler, self).current_user
-    #     #if user is None:
-    #     #    user = self.get_current_user()
-    #     #    print user
-    #     return user
+    @property
+    def all_rooms(self):
+        return self.db.all_rooms
+
 
 class ChatHandler(tornado.websocket.WebSocketHandler):
-    @gen.coroutine
-    def get(self):
-        pass
+    waiters = dict()
+    for room in DB.rooms:
+        waiters[room] = set()
 
-def main(port=8080, interface='localhost'):
+    def __init__(self, *args, **kwargs):
+        super(ChatHandler, self).__init__(*args, **kwargs)
+        self.db = DB
+
+    def open(self):
+        self.connect_to_room(self.db.default_room)
+
+    def on_close(self):
+        if self in self.waiters[self.current_room]:
+            self.waiters[self.current_room].remove(self)
+
+    def on_message(self, mess):
+        room = self.current_room
+        user = self.current_user
+        if user is None:
+            user = 'Anonymous'
+        mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
+        print mess
+        self.db.new_message(room, mess)
+        self.send_to_waiters(room, mess)
+
+
+    def send_to_waiters(self, room, mess):
+        mess = 'MESSAGE:[%s] %s' % (room, mess)
+        for waiter in self.waiters[room]:
+            try:
+                waiter.write_message(mess)
+            except:
+                pass
+
+    def connect_to_room(self, room):
+        self.waiters[room].add(self)
+        self.send_server_message('You a connected to room: "%s"' % room)
+        history = self.db.get_room_history(room)
+        self.send_history(room, history)
+
+    def send_server_message(self, mess):
+        mess = 'SERVER:%s' % mess
+        mess = tornado.escape.xhtml_escape(mess)
+        self.write_message(mess)
+
+    def send_history(self, room, history):
+        for mess in history:
+            mess = 'MESSAGE:[%s] %s' % (room, mess)
+            self.write_message(mess)
+
+    def get_current_user(self):
+        return self.get_secure_cookie('user')
+
+    @property
+    def current_room(self):
+        user = self.current_user
+        return self.db.get_user_current_room(user)
+
+    def set_current_room(self, room):
+        if room not in self.db.rooms:
+            return None
+        self.waiters[self.current_room].remove(self)
+        self.waiters[room].add(self)
+        self.db.set_user_current_room(self.current_user, room)
+        return room
+
+def main(host, port):
     handlers = [
         (r"/", MainHandler),
         (r"/chat", ChatHandler)
     ]
-    sett =  {
+    sett = {
         'cookie_secret': '%RamblerTask-WebSocketChat%',
         'template_path': os.path.join(os.path.dirname(__file__), 'templates'),
         'static_path': os.path.join(os.path.dirname(__file__), 'static'),
         'xsrf_cookies': True,
     }
     app = tornado.web.Application(handlers, **sett)
-    app.listen(port, interface)
+    app.listen(port, host)
     IOLoop.current().start()
 
-def run():
-    main()
+
+def run(host='localhost', port=8080):
+    main(host, port)
 
 if __name__ == '__main__':
     run()
