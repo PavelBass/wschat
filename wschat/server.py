@@ -43,6 +43,10 @@ class MainHandler(tornado.web.RequestHandler):
 
     @gen.coroutine
     def post(self):
+        """ Called on POST HTTP request from user.
+            Allowed requests to Login, Register, Logout
+        :return:
+        """
         # Logout
         logout = self.get_argument('logout', '')
         if logout == 'logout':
@@ -53,27 +57,32 @@ class MainHandler(tornado.web.RequestHandler):
         error = ''
         create = self.get_argument('create', '')
         login, password = self.get_argument('login', None), self.get_argument('pass', None)
+        # Check empty/not given fields
         if None in (login, password) or not (login and password):
             error = 'Empty field'
             self.render('index.html', usr=None, error=error, rooms=self.all_rooms)
             return
         if create:
+            # Registration
             user = self.db.new_user(login, password)
             if user is None:
                 error = 'Such user already exists'
         else:
+            # Login
             user = self.db.is_correct_user(login, password)
             if user is None:
                 error = "No such user"
             elif not user:
                 error = 'Wrong password'
         if error:
+            # Error during Login/Registration
             self.render('index.html', usr=None, error=error, rooms=self.all_rooms)
             return
         self.set_secure_cookie('user', login)
         self.redirect('/')
 
     def get_current_user(self):
+        """ Get authorized user from cookie record """
         user = self.get_secure_cookie('user')
         if self.db.is_correct_user(user, '') is None:
             # Non-existent in database user
@@ -83,6 +92,7 @@ class MainHandler(tornado.web.RequestHandler):
 
     @property
     def all_rooms(self):
+        """ Value of all created rooms, stored in DataBase """
         return self.db.all_rooms
 
 
@@ -95,7 +105,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         super(ChatHandler, self).__init__(*args, **kwargs)
         self.db = DB
         self._user = None
-        self.knows_commands = dict(
+        self.known_commands = dict(
             login=self.command_login,
             logout=self.command_logout,
             register=self.command_register
@@ -111,30 +121,48 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
                 self.connect_to_room(room)
 
     def on_close(self):
+        # Remove self from message waiters (unsubscribe)
         for room in self.current_rooms:
             if self in self.waiters[room]:
                 self.waiters[room].remove(self)
 
     def on_message(self, mess):
+        """ Called when was recieved a message. Checking and
+            saving message. If message contains contains
+            command to server, call suitable method.
+        :param mess: utf-8 string, if mess starts with '#' -
+            it is a command for server. In general view:
+            '#command arg1 arg2 arg3 ... argN'
+        """
         rooms = self.current_rooms
         user = self.current_user
         if user is None:
             user = 'Anonymous'
+
         if mess.startswith('#'):
+            # Command
             mess = mess[1:].split(' ', 1)
             command = mess[0]
             args = mess[1] if len(mess) - 1 else ''
-            if command not in self.knows_commands:
+            if command not in self.known_commands:
                 self.send_server_message('Unknown command')
             else:
-                self.knows_commands[command.lower()](args)
+                self.known_commands[command.lower()](args)
         else:
+            # Message
             mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
             for room in rooms:
                 self.db.new_message(room, mess)
                 self.send_to_waiters(room, mess)
 
     def send_to_waiters(self, room, mess):
+        """ Send received message to all waiters of room.
+            This method sends users messages only, not
+            server answers. General view of sending
+            message: "MESSAGE:[room] nickname: mess"
+        :param room: room name where message was sent
+        :param mess: received message
+        """
         mess = 'MESSAGE:[%s] %s' % (room, mess)
         for waiter in self.waiters[room]:
             try:
@@ -143,7 +171,11 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
                 pass
 
     def connect_to_room(self, room):
-        # NOTE: you must check if room exists before calling this method
+        """ Add self to waiters of rooms (subscribe)
+            NOTE: you must check if room exists
+              before calling this method
+        :param room: room name to subscribe
+        """
         self.waiters[room].add(self)
         self.send_server_message('You are connected to room: "%s"' % room)
         user = self.current_user
@@ -153,29 +185,55 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         self.send_history(room, history)
 
     def disconnect_from_room(self, room):
-        # NOTE: you must check if room exists before calling this method
+        """ Remove self from waiters of room (unsubscribe)
+            NOTE: you must check if room exists
+              before calling this method
+        :param room: room name to unsubscribe
+        """
         self.waiters[room].remove(self)
         self.send_server_message('You are disconnected from room: "%s"' % room)
 
     def send_server_message(self, mess):
+        """ Send server message to user.
+            This method sends server answers only, not
+            users messages. General view of sending
+            message: "SERVER:mess"
+        :param mess: server message
+        """
         mess = 'SERVER:%s' % mess
         mess = tornado.escape.xhtml_escape(mess)
         self.write_message(mess)
 
     def send_history(self, room, history):
+        """ Send last N messages of room to user.
+        :param room: room name
+        :param history: list/tuple of last messages taken from db.
+            DataBase stores messages as "user: mess", so for
+            general view "MESSAGE:[room] user: mess" we need to
+            add "MESSAGE:[room] "
+        """
         for mess in history:
             mess = 'MESSAGE:[%s] %s' % (room, mess)
             self.write_message(mess)
 
     @property
     def current_user(self):
+        """ Rewritten property of current user. By default tornado
+            caches value given from "get_current_user", so we need
+            rewrite it to receive actual user.
+        """
         return self.get_current_user()
 
     def get_current_user(self):
+        """ Rewritten method to get current user. Our Handler
+            stores own value of current user per connection.
+        """
         return self._user
 
     @property
     def current_rooms(self):
+        """ List/tuple of rooms to which the user has been connected
+        """
         user = self.current_user
         return self.db.get_current_rooms(user)
 
