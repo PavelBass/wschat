@@ -289,6 +289,8 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
             # Command
             self.recognize_command(mess)
         else:
+            if not self.current_rooms:
+                self.send_server_message('You are not connected to any room')
             # Message
             mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
             for room in rooms:
