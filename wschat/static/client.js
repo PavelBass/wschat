@@ -22,6 +22,13 @@ ws.onmessage = function(evnt){
     }
 };
 
+ws.onclose = function(){
+    var source = elem_to_write.innerHTML;
+    source  = source + '<br><p>&nbsp;</p><error>You was disconnected.' +
+    '<br>Refresh page to create new connection.</error>';
+    elem_to_write.innerHTML = source;
+}
+
 function write_message(mess){
     var source = elem_to_write.innerHTML;
     elem_to_write.innerHTML = source + '<p>'+mess+'</p>';
