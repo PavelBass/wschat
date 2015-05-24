@@ -31,13 +31,22 @@ DB = DBInterface()
 
 
 class CommandsMixin(object):
-    """ Mixin of commands """
+    """ Mixin of commands
+        Agreements:
+          Naming: all mixin methods which implements commands
+            starts with 'user_command_' prefix.
+          Arguments: all commands methods must expect one argument -
+            utf-8 string to recognize needed arguments itself, or
+            ignore them
+    """
     def __init__(self):
         # Original variable
         self.known_commands = dict(
-            login=self.command_login,
-            logout=self.command_logout,
-            register=self.command_register
+            login=self.user_command_login,
+            logout=self.user_command_logout,
+            register=self.user_command_register,
+            join=self.user_command_join_room,
+            left=self.user_command_left_room
         )
         # Must be overwritten
         self.db = None
@@ -47,7 +56,23 @@ class CommandsMixin(object):
         """ Must be overwritten """
         raise NotImplementedError('"send_server_message" method must be overwritten')
 
-    def command_login(self, login_password):
+    def recognize_command(self, mess):
+        """ Recognize received command and try to call
+            suitable method.
+            NOTE: method detects only first word, so if command consist
+                of few words, other part of command will be passed in
+                arguments string.
+        :param mess: utf-8 string received from user
+        """
+        mess = mess[1:].split(' ', 1)
+        command = mess[0].lower()
+        args = mess[1] if len(mess) - 1 else ''
+        if command not in self.known_commands:
+            self.send_server_message('Unknown command')
+        else:
+            self.known_commands[command.lower()](args)
+
+    def user_command_login(self, login_password):
         """ Login user.
             Required command view: 'login user_login password'.
         :param login_password: separated part "user_login password"
@@ -69,9 +94,13 @@ class CommandsMixin(object):
             # No error during login
             mess = 'You are logged in as "%s"' % login
             self._user = login
+            if (self in self.waiters[self.db.default_room]
+                and self.db.default_room not in self.current_rooms):
+                self.db.add_room_to_current(login, self.db.default_room)
+
         self.send_server_message(mess)
 
-    def command_logout(self, args):
+    def user_command_logout(self, args):
         """ Logout.
             Just change own user value to None
         :param args: not needed. Ignored.
@@ -79,7 +108,7 @@ class CommandsMixin(object):
         self._user = None
         self.send_server_message('You are logged out')
 
-    def command_register(self, login_password):
+    def user_command_register(self, login_password):
         """ Register new user.
             Required command view: 'register user_login password'.
         :param login_password: separated part "user_login password"
@@ -98,6 +127,59 @@ class CommandsMixin(object):
                 mess = 'User "%s" successfully created. Try to login.' % login
         self.send_server_message(mess)
 
+    def user_command_join_room(self, room_room):
+        """ Adding self to waiters of room.
+            Required command view: 'join room room_name'.
+        :param room_room: separated part "room room_name"
+        """
+        room_room = room_room.strip(' ').split(' ', 1)
+        mess = ''
+        try:
+            room, room_name = room_room[0], room_room[1]
+        except IndexError:
+            mess = 'Wrong command usage'
+        if mess:
+            pass
+        elif room.lower() != 'room':
+            mess = 'Unknown join'
+        elif room_name.lower() not in map(lambda x: x.lower(), self.all_rooms):
+            mess = 'Cannot join. Unknown room'
+        else:
+            # Find right room name writing
+            for room in self.all_rooms:
+                if room_name.lower() == room.lower():
+                    room_name = room
+                    break
+            self.connect_to_room(room_name)
+        if mess:
+            self.send_server_message(mess)
+
+    def user_command_left_room(self, room_room):
+        """ Removing self from waiters of room.
+            Required command view: 'left room room_name'.
+        :param room_room: separated part "room room_name"
+        """
+        room_room = room_room.strip(' ').split(' ', 1)
+        mess = ''
+        try:
+            room, room_name = room_room[0], room_room[1]
+        except IndexError:
+            mess = 'Wrong command usage'
+        if mess:
+            pass
+        elif room.lower() != 'room':
+            mess = 'What must I left?'
+        elif room_name.lower() not in map(lambda x: x.lower(), self.current_rooms):
+            mess = 'You were not joined to room "%s"' % room_name
+        else:
+            # Find right room name writing
+            for room in self.current_rooms:
+                if room_name.lower() == room.lower():
+                    room_name = room
+                    break
+            self.disconnect_from_room(room_name)
+        if mess:
+            self.send_server_message(mess)
 
 class MainHandler(tornado.web.RequestHandler):
     def initialize(self):
@@ -191,7 +273,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
                 self.waiters[room].remove(self)
 
     def on_message(self, mess):
-        """ Called when was recieved a message. Checking and
+        """ Called when was received a message. Checking and
             saving message. If message contains contains
             command to server, call suitable method.
         :param mess: utf-8 string, if mess starts with '#' -
@@ -205,13 +287,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
 
         if mess.startswith('#'):
             # Command
-            mess = mess[1:].split(' ', 1)
-            command = mess[0]
-            args = mess[1] if len(mess) - 1 else ''
-            if command not in self.known_commands:
-                self.send_server_message('Unknown command')
-            else:
-                self.known_commands[command.lower()](args)
+            self.recognize_command(mess)
         else:
             # Message
             mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
@@ -240,13 +316,23 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
               before calling this method
         :param room: room name to subscribe
         """
-        self.waiters[room].add(self)
-        self.send_server_message('You are connected to room: "%s"' % room)
         user = self.current_user
-        if user is not None and room not in self.current_rooms:
+        current_rooms = set(self.current_rooms)
+        if user is None:
+            allowed_rooms = [self.db.default_room]
+        else:
+            allowed_rooms = set(self.all_rooms) - current_rooms
+        if room in current_rooms or self in self.waiters[room]:
+            mess = 'You are already connected to room "%s"' % room
+        elif room not in allowed_rooms:
+            mess = 'You cant connect to room "%s"' % room
+        else:
+            mess = 'You are connected to room: "%s"' % room
+            self.waiters[room].add(self)
             self.db.add_room_to_current(user, room)
-        history = self.db.get_room_history(room)
-        self.send_history(room, history)
+            history = self.db.get_room_history(room)
+            self.send_history(room, history)
+        self.send_server_message(mess)
 
     def disconnect_from_room(self, room):
         """ Remove self from waiters of room (unsubscribe)
@@ -254,6 +340,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
               before calling this method
         :param room: room name to unsubscribe
         """
+
         self.waiters[room].remove(self)
         self.send_server_message('You are disconnected from room: "%s"' % room)
 
@@ -299,14 +386,23 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         """ List/tuple of rooms to which the user has been connected
         """
         user = self.current_user
-        return self.db.get_current_rooms(user)
+        if user is None:
+            droom = self.db.default_room
+            return [droom] if self in self.waiters[droom] else list()
+        else:
+            return self.db.get_current_rooms(user)
+
+    @property
+    def all_rooms(self):
+        """ Value of all created rooms, stored in DataBase """
+        return self.db.all_rooms
 
 
 def main(host, port):
     handlers = [
         (r"/", MainHandler),
         (r"/chat", ChatHandler)
-    ]
+    ]#join room Python Developers
     sett = {
         'cookie_secret': '%RamblerTask-WebSocketChat%',
         'template_path': os.path.join(os.path.dirname(__file__), 'templates'),

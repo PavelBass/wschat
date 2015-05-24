@@ -138,8 +138,11 @@ class DBPython(DB):
         return rooms
 
     def add_room_to_current(self, login, room):
+        if login is None:
+            return
         user = self._users[login]
-        rooms = list(user.current_rooms).append(room)
+        rooms = list(user.current_rooms)
+        rooms.append(room)
         self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
 
     def remove_room_from_current(self, login, room):
@@ -158,7 +161,7 @@ class DBPython(DB):
         if login in self._users:
             return
         allowed_rooms = (self.default_room,)
-        self._users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, allowed_rooms)
+        self._users[login] = UserRecord(hashlib.md5(password).hexdigest(), allowed_rooms, tuple())
         return allowed_rooms
 
     def new_room(self, room):
