@@ -355,7 +355,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
             # Command
             self.recognize_command(mess)
         else:
-            if not self.current_rooms:
+            if not list(self.current_rooms):
                 self.send_server_message('You are not connected to any room')
             for room in rooms:
                 nick = self.db.get_current_nick(user, room)
@@ -416,6 +416,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         """
 
         self.waiters[room].remove(self)
+        self.db.remove_room_from_current(self.current_user, room)
         self.send_server_message('You are disconnected from room: "%s"' % room)
 
     def send_server_message(self, mess):
