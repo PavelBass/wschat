@@ -29,6 +29,9 @@ LEFT ROOM - выйти из комнаты
 
 Для реализации сервера выбран [Tornado framework](http://www.tornadoweb.org/ "Торнадо фреймворк").
 
+**Примечание:** Сервер написан на python 2.7, c использованием Tornado 4.2b1, работа клиента проверена на IceWeasel 24.7.0 (linux), Google Chrome 36.0.1985.125 (linux). Операционная система GNU/Linux 3.2.0-4-amd64 \#1 SMP Debian 3.2.60-1+deb7u3 
+
+
 ### 1. Протоколы
 
 Запущенный сервер предоставляет html страницу (HTTP [RFC 2616](https://tools.ietf.org/html/rfc2616 "Hypertext Transfer Protocol -- HTTP/1.1")) с реализацией клента (JavaScript), расположенную в корне ('/') запущенного сервера. WebSocket протокол [(RFC 6455)](http://tools.ietf.org/html/rfc6455 "The WebSocket Protocol") предоставляется по пути '/chat' адреса запущенного сервера.
