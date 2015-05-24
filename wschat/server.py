@@ -326,6 +326,9 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         self.db = DB
         self._user = None
 
+    def check_origin(self, origin):
+        return True
+
     def open(self):
         user = self.get_secure_cookie('user')
         if user is None:
