@@ -39,4 +39,12 @@ function sender_click(){
     elem.value = '';
 }
 
+function sender_enter_key(event){
+    if(event.which == 13 || event.keyCode == 13) {
+        sender_click()
+    }
+}
+
+
 document.getElementById('sender_button').onclick = sender_click;
+document.getElementById('sendmessage').onkeyup = sender_enter_key;
