@@ -30,6 +30,75 @@ else:
 DB = DBInterface()
 
 
+class CommandsMixin(object):
+    """ Mixin of commands """
+    def __init__(self):
+        # Original variable
+        self.known_commands = dict(
+            login=self.command_login,
+            logout=self.command_logout,
+            register=self.command_register
+        )
+        # Must be overwritten
+        self.db = None
+        self._user = None
+
+    def send_server_message(self, mess):
+        """ Must be overwritten """
+        raise NotImplementedError('"send_server_message" method must be overwritten')
+
+    def command_login(self, login_password):
+        """ Login user.
+            Required command view: 'login user_login password'.
+        :param login_password: separated part "user_login password"
+        """
+        login_password = filter(lambda x: x, login_password.strip(' ').split(' '))
+        mess = ''
+        try:
+            login, password = login_password[0], login_password[1]
+            user = self.db.is_correct_user(login, password)
+        except IndexError:
+            mess = 'Wrong command usage'
+        if mess:
+            pass
+        elif user is None:
+            mess = 'No such user'
+        elif not user:
+            mess = 'Password incorrect'
+        else:
+            # No error during login
+            mess = 'You are logged in as "%s"' % login
+            self._user = login
+        self.send_server_message(mess)
+
+    def command_logout(self, args):
+        """ Logout.
+            Just change own user value to None
+        :param args: not needed. Ignored.
+        """
+        self._user = None
+        self.send_server_message('You are logged out')
+
+    def command_register(self, login_password):
+        """ Register new user.
+            Required command view: 'register user_login password'.
+        :param login_password: separated part "user_login password"
+        """
+        login_password = filter(lambda x: x, login_password.strip(' ').split(' '))
+        mess = ''
+        try:
+            login, password = login_password[0], login_password[1]
+        except IndexError:
+            mess = 'Wrong command usage'
+        if not mess:
+            user = self.db.new_user(login, password)
+            if user is None:
+                mess = 'Such user already exists'
+            else:
+                mess = 'User "%s" successfully created. Try to login.' % login
+        self.send_server_message(mess)
+
+
 class MainHandler(tornado.web.RequestHandler):
     def initialize(self):
         self.db = DB
@@ -96,7 +165,7 @@ class MainHandler(tornado.web.RequestHandler):
         return self.db.all_rooms
 
 
-class ChatHandler(tornado.websocket.WebSocketHandler):
+class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
     waiters = dict()
     for room in DB.all_rooms:
         waiters[room] = set()
@@ -105,11 +174,6 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         super(ChatHandler, self).__init__(*args, **kwargs)
         self.db = DB
         self._user = None
-        self.known_commands = dict(
-            login=self.command_login,
-            logout=self.command_logout,
-            register=self.command_register
-        )
 
     def open(self):
         user = self.get_secure_cookie('user')
@@ -236,44 +300,6 @@ class ChatHandler(tornado.websocket.WebSocketHandler):
         """
         user = self.current_user
         return self.db.get_current_rooms(user)
-
-    def command_login(self, login_password):
-        login_password = filter(lambda x: x, login_password.strip(' ').split(' '))
-        mess = ''
-        try:
-            login, password = login_password[0], login_password[1]
-            user = self.db.is_correct_user(login, password)
-        except IndexError:
-            mess = 'Wrong command usage'
-        if mess:
-            pass
-        elif user is None:
-            mess = 'No such user'
-        elif not user:
-            mess = 'Password incorrect'
-        else:
-            mess = 'You are logged in as "%s"' % login
-            self._user = login
-        self.send_server_message(mess)
-
-    def command_logout(self, args):
-        self._user = None
-        self.send_server_message('You are logged out')
-
-    def command_register(self, login_password):
-        login_password = filter(lambda x: x, login_password.strip(' ').split(' '))
-        mess = ''
-        try:
-            login, password = login_password[0], login_password[1]
-        except IndexError:
-            mess = 'Wrong command usage'
-        if not mess:
-            user = self.db.new_user(login, password)
-            if user is None:
-                mess = 'Such user already exists'
-            else:
-                mess = 'User "%s" successfully created. Try to login.' % login
-        self.send_server_message(mess)
 
 
 def main(host, port):
