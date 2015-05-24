@@ -76,6 +76,11 @@ class CommandsMixin(object):
         """ Must be overwritten """
         raise NotImplementedError('"all_rooms" property must be overwritten')
 
+    @property
+    def current_user(self):
+        """ Must be overwritten """
+        raise NotImplementedError('"current_user" property must be overwritten')
+
     # Original methods
     def recognize_command(self, mess):
         """ Recognize received command and try to call
@@ -209,6 +214,7 @@ class CommandsMixin(object):
         """
         mess, room, nick = ['']*3
         command, s, args = args.partition(' ')
+        # Parsing args
         if command.lower() != 'nick':
             mess = 'What must I change?'
         else:
@@ -222,6 +228,7 @@ class CommandsMixin(object):
             elif args:
                 room, nick = args.split(' ', 1)
                 nick = nick.strip(' ')
+        # Checking arguments
         if mess:
             pass
         elif not(room and nick):
@@ -235,9 +242,7 @@ class CommandsMixin(object):
                     room = _room
                     break
             mess = 'Your nick changed to "%s" in room "%s"' % (nick, room)
-            ######################
-            # Rewrite something =)
-            ######################
+            self.db.change_nick_in_room(self.current_user, room, nick)
         self.send_server_message(mess)
 
 
@@ -290,6 +295,7 @@ class MainHandler(tornado.web.RequestHandler):
             self.render('index.html', usr=None, error=error, rooms=self.all_rooms)
             return
         self.set_secure_cookie('user', login)
+        self.db.add_room_to_current(login, self.db.default_room)
         self.redirect('/')
 
     def get_current_user(self):
@@ -342,8 +348,6 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         """
         rooms = self.current_rooms
         user = self.current_user
-        if user is None:
-            user = 'Anonymous'
 
         if mess.startswith('#'):
             # Command
@@ -351,9 +355,10 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         else:
             if not self.current_rooms:
                 self.send_server_message('You are not connected to any room')
-            # Message
-            mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
             for room in rooms:
+                user = self.db.get_current_nick(user, room)
+                # Message
+                mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
                 self.db.new_message(room, mess)
                 self.send_to_waiters(room, mess)
 
@@ -380,18 +385,22 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         """
         user = self.current_user
         current_rooms = set(self.current_rooms)
+        for _room in self.current_rooms:
+            if self not in self.waiters[_room]:
+                current_rooms.remove(_room)
         if user is None:
             allowed_rooms = [self.db.default_room]
         else:
             allowed_rooms = set(self.all_rooms) - current_rooms
-        if room in current_rooms or self in self.waiters[room]:
+        if self in self.waiters[room]:
             mess = 'You are already connected to room "%s"' % room
         elif room not in allowed_rooms:
             mess = 'You cant connect to room "%s"' % room
         else:
             mess = 'You are connected to room: "%s"' % room
             self.waiters[room].add(self)
-            self.db.add_room_to_current(user, room)
+            if room not in current_rooms:
+                self.db.add_room_to_current(user, room)
             history = self.db.get_room_history(room)
             self.send_history(room, history)
         self.send_server_message(mess)

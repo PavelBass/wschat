@@ -75,6 +75,24 @@ class DB(object):
         pass
 
     @abstractmethod
+    def change_nick_in_room(self, login, room, nick):
+        """ Change nick of user with received login in room
+        :param login: user login
+        :param room: room name
+        :param nick: new nick
+        """
+        pass
+
+    @abstractmethod
+    def get_current_nick(self, login, room):
+        """ Return stored nickname of user for room
+        :param login: user login
+        :param room: room name
+        :return: nickname
+        """
+        pass
+
+    @abstractmethod
     def new_user(self, login, password):
         """ Create new user
         :param login: passed login
@@ -134,21 +152,26 @@ class DBPython(DB):
         return hashlib.md5(password).hexdigest() == user.pass_hash
 
     def get_current_rooms(self, login):
-        rooms = (self.default_room,) if login not in self._users else self._users[login].current_rooms
+        rooms = (self.default_room,)
+        if login in self._users:
+            rooms = self._users[login].current_rooms
+            rooms = (x[0] for x in rooms)
         return rooms
 
     def add_room_to_current(self, login, room):
-        if login is None:
+        if login is None or room in self.get_current_rooms(login):
             return
         user = self._users[login]
         rooms = list(user.current_rooms)
-        rooms.append(room)
+        rooms.append((room, login,))
         self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
 
     def remove_room_from_current(self, login, room):
         user = self._users[login]
         rooms = list(user.current_rooms)
-        rooms.pop(room)
+        for _room in rooms[:]:
+            if room == _room[0]:
+                rooms.pop(_room)
         self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
 
     def get_room_history(self, room):
@@ -156,6 +179,25 @@ class DBPython(DB):
         if history is not None:
             history = history[-10:]
         return history
+
+    def change_nick_in_room(self, login, room, nick):
+        if login is None:
+            return
+        user = self._users[login]
+        rooms = list(user.current_rooms)
+        for _room in rooms[:]:
+            if room == _room[0]:
+                rooms[rooms.index(_room)] = (room, nick,)
+        self._users[login] = UserRecord(user.pass_hash, user.allowed_rooms, tuple(rooms))
+
+    def get_current_nick(self, login, room):
+        if login is None:
+            return 'Anonymous'
+        user = self._users[login]
+        rooms = list(user.current_rooms)
+        for _room in rooms[:]:
+            if room == _room[0]:
+                return _room[1]
 
     def new_user(self, login, password):
         if login in self._users:
