@@ -233,17 +233,20 @@ class CommandsMixin(object):
             pass
         elif not(room and nick):
             mess = 'Wrong command usage'
-        elif room.lower() not in map(lambda x: x.lower(), self.current_rooms):
+        elif room != '*' and room.lower() not in map(lambda x: x.lower(), self.current_rooms):
             mess = 'You were not joined to room "%s"' % room
         else:
             # Find right room name writing
-            for _room in self.current_rooms:
-                if room.lower() == _room.lower():
-                    room = _room
-                    break
-            mess = 'Your nick changed to "%s" in room "%s"' % (nick, room)
-            self.db.change_nick_in_room(self.current_user, room, nick)
-        self.send_server_message(mess)
+            rooms = self.current_rooms
+            if room != '*':
+                for _room in self.current_rooms:
+                    if room.lower() == _room.lower():
+                        rooms = [_room]
+                        break
+            for room in rooms:
+                mess = 'Your nick changed to "%s" in room "%s"' % (nick, room)
+                self.db.change_nick_in_room(self.current_user, room, nick)
+                self.send_server_message(mess)
 
 
 class MainHandler(tornado.web.RequestHandler):
@@ -348,7 +351,6 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         """
         rooms = self.current_rooms
         user = self.current_user
-
         if mess.startswith('#'):
             # Command
             self.recognize_command(mess)
@@ -356,11 +358,11 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
             if not self.current_rooms:
                 self.send_server_message('You are not connected to any room')
             for room in rooms:
-                user = self.db.get_current_nick(user, room)
+                nick = self.db.get_current_nick(user, room)
                 # Message
-                mess = '%s: %s' % (user, tornado.escape.xhtml_escape(mess))
-                self.db.new_message(room, mess)
-                self.send_to_waiters(room, mess)
+                _mess = '%s: %s' % (nick, tornado.escape.xhtml_escape(mess))
+                self.db.new_message(room, _mess)
+                self.send_to_waiters(room, _mess)
 
     def send_to_waiters(self, room, mess):
         """ Send received message to all waiters of room.
@@ -397,10 +399,11 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         elif room not in allowed_rooms:
             mess = 'You cant connect to room "%s"' % room
         else:
-            mess = 'You are connected to room: "%s"' % room
             self.waiters[room].add(self)
             if room not in current_rooms:
                 self.db.add_room_to_current(user, room)
+            mess = 'You are connected to room: "%s" as "%s"' % \
+                   (room, self.db.get_current_nick(user, room))
             history = self.db.get_room_history(room)
             self.send_history(room, history)
         self.send_server_message(mess)
