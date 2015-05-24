@@ -46,16 +46,37 @@ class CommandsMixin(object):
             logout=self.user_command_logout,
             register=self.user_command_register,
             join=self.user_command_join_room,
-            left=self.user_command_left_room
+            left=self.user_command_left_room,
+            change=self.user_command_change_nick
         )
         # Must be overwritten
         self.db = None
         self._user = None
 
+    # Child Implementation methods
     def send_server_message(self, mess):
         """ Must be overwritten """
         raise NotImplementedError('"send_server_message" method must be overwritten')
 
+    def connect_to_room(self, room):
+        """ Must be overwritten """
+        raise NotImplementedError('"connect_to_room" method must be overwritten')
+
+    def disconnect_from_room(self, room):
+        """ Must be overwritten """
+        raise NotImplementedError('"disconnect_from_room" method must be overwritten')
+
+    @property
+    def current_rooms(self):
+        """ Must be overwritten """
+        raise NotImplementedError('"current_rooms" property must be overwritten')
+
+    @property
+    def all_rooms(self):
+        """ Must be overwritten """
+        raise NotImplementedError('"all_rooms" property must be overwritten')
+
+    # Original methods
     def recognize_command(self, mess):
         """ Recognize received command and try to call
             suitable method.
@@ -180,6 +201,45 @@ class CommandsMixin(object):
             self.disconnect_from_room(room_name)
         if mess:
             self.send_server_message(mess)
+
+    def user_command_change_nick(self, args):
+        """ Changing nickname in room or all rooms
+            Required command view: 'change nick room_name new_nick'
+        :param args: separated part 'nick room_name new_nick'
+        """
+        mess, room, nick = ['']*3
+        command, s, args = args.partition(' ')
+        if command.lower() != 'nick':
+            mess = 'What must I change?'
+        else:
+            args = args.strip(' ')
+            if args and args[0] in ['"', "'"]:
+                room, s, args = args[1:].partition(args[0])
+                room = room.strip(' ')
+                nick = args.strip(' ')
+                if nick and nick[0] in ['"', "'"]:
+                    nick, s, trash = nick[1:].partition(nick[0])
+            elif args:
+                room, nick = args.split(' ', 1)
+                nick = nick.strip(' ')
+        if mess:
+            pass
+        elif not(room and nick):
+            mess = 'Wrong command usage'
+        elif room.lower() not in map(lambda x: x.lower(), self.current_rooms):
+            mess = 'You were not joined to room "%s"' % room
+        else:
+            # Find right room name writing
+            for _room in self.current_rooms:
+                if room.lower() == _room.lower():
+                    room = _room
+                    break
+            mess = 'Your nick changed to "%s" in room "%s"' % (nick, room)
+            ######################
+            # Rewrite something =)
+            ######################
+        self.send_server_message(mess)
+
 
 class MainHandler(tornado.web.RequestHandler):
     def initialize(self):
