@@ -353,6 +353,7 @@ class ChatHandler(tornado.websocket.WebSocketHandler, CommandsMixin):
         user = self.current_user
         if mess.startswith('#'):
             # Command
+            logging.info('Recieved command: `%s`', mess)
             self.recognize_command(mess)
         else:
             if not list(self.current_rooms):
